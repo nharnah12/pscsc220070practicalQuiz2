@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>PS-CSC-22-0070-Solar System</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: black;
+      font-family: Arial, sans-serif;
+    }
+    #info {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      color: white;
+      background: rgba(0, 0, 0, 0.8);
+      padding: 15px;
+      border-radius: 8px;
+      z-index: 100;
+    }
+    #controls {
+      position: absolute;
+      bottom: 20px;
+      left: 20px;
+      color: white;
+      background: rgba(0, 0, 0, 0.8);
+      padding: 12px;
+      border-radius: 8px;
+      font-size: 12px;
+      z-index: 100;
+    }
+
+    /* Labels container and label styling */
+    #labels {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 250;
+    }
+    .label {
+      position: absolute;
+      transform: translate(-50%, 8px);
+      color: #ffffff;
+      background: rgba(255, 255, 255, 0);
+      padding: 4px 8px;
+      border-radius: 6px;
+      font-size: 12px;
+      white-space: nowrap;
+      text-shadow: 0 0 6px rgba(0,0,0,0.9);
+      pointer-events: none;
+      transition: transform 0.08s linear, opacity 0.08s linear;
+      opacity: 0.95;
+    }
+  </style>
+</head>
+<body>
+
+<div id="info">
+  <h2 style="margin: 0 0 10px 0;">The Solar System</h2>
+  <p style="margin: 0;">PS/CSC/22/0070</p>
+  <p style="margin: 0;">8 Planets orbiting the Sun</p>
+</div>
+
+<div id="controls">
+  <div>Drag to rotate</div>
+  <div>Scroll to zoom</div>
+</div>
+
+<!-- labels overlay -->
+<div id="labels"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.min.js"></script>
+<script>
+  // SCENE SETUP
+  const scene = new THREE.Scene();
+
+  const camera = new THREE.PerspectiveCamera(
+    60,
+    window.innerWidth / window.innerHeight,
+    0.1,
+    3000
+  );
+  camera.position.set(0, 30, 50);
+  camera.lookAt(0, 0, 0);
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.outputEncoding = THREE.sRGBEncoding;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.25;
+  document.body.appendChild(renderer.domElement);
+
+  // CLOCK
+  const clock = new THREE.Clock();
+
+  // LIGHTING
+  scene.add(new THREE.AmbientLight(0x666666, 0.55));
+
+  // Point light at the sun
+  const sunLight = new THREE.PointLight(0xffb38a, 8.0, 1200, 2);
+  scene.add(sunLight);
+
+  // TEXTURE LOADER
+  const textureLoader = new THREE.TextureLoader();
+
+  // STAR BACKGROUND IMAGE SPHERE (optional texture file)
+  // Put your star background image at: assets-management/stars.jpg
+  let starSphere = null;
+  textureLoader.load('assets-management/stars.jpg',
+    (tex) => {
+      if (tex.colorSpace !== undefined) tex.colorSpace = THREE.SRGBColorSpace;
+      else tex.encoding = THREE.sRGBEncoding;
+      const mat = new THREE.MeshBasicMaterial({
+        map: tex,
+        side: THREE.BackSide,
+        transparent: true,
+        opacity: 1.0
+      });
+      starSphere = new THREE.Mesh(new THREE.SphereGeometry(1980, 48, 48), mat);
+      starSphere.renderOrder = 1;
+      scene.add(starSphere);
+    },
+    undefined,
+    // silently ignore if missing; we'll still add procedural stars below
+    () => {}
+  );
+
+  // MILKY WAY SKYBOX (kept) - will sit in front of the starSphere if both exist
+  const milkyWayTexture = textureLoader.load('assets-management/milkyway.jpg', () => {
+    if (milkyWayTexture.colorSpace !== undefined) milkyWayTexture.colorSpace = THREE.SRGBColorSpace;
+    else milkyWayTexture.encoding = THREE.sRGBEncoding;
+  });
+
+  const milkyWaySphere = new THREE.Mesh(
+    new THREE.SphereGeometry(2000, 64, 64),
+    new THREE.MeshBasicMaterial({
+      map: milkyWayTexture,
+      side: THREE.BackSide,
+      transparent: true,
+      opacity: 0.6
+    })
+  );
+  scene.add(milkyWaySphere);
+
+  // ---------------- Procedural star points field ----------------
+  // This creates many small star sprites for depth and twinkle, complementing a star image if you provide one.
+  let starPoints = null;
+
+  // small star sprite texture (radial gradient)
+  function createStarSprite(size = 64) {
+    const c = document.createElement('canvas');
+    c.width = c.height = size;
+    const ctx = c.getContext('2d');
+
+    const cx = size / 2, cy = size / 2, r = size / 2;
+    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+    grad.addColorStop(0.0, 'rgba(255,255,255,1)');
+    grad.addColorStop(0.07, 'rgba(255,250,220,0.95)');
+    grad.addColorStop(0.18, 'rgba(200,220,255,0.7)');
+    grad.addColorStop(0.5, 'rgba(160,180,220,0.28)');
+    grad.addColorStop(1.0, 'rgba(0,0,0,0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, size, size);
+
+    const tex = new THREE.CanvasTexture(c);
+    if (tex.colorSpace !== undefined) tex.colorSpace = THREE.SRGBColorSpace;
+    else tex.encoding = THREE.sRGBEncoding;
+    tex.needsUpdate = true;
+    return tex;
+  }
+
+  // build procedural starfield
+  function buildStarField(count = 4000, radiusMin = 900, radiusMax = 1800) {
+    const positions = new Float32Array(count * 3);
+    const colors = new Float32Array(count * 3);
+    const sizes = new Float32Array(count);
+
+    const color = new THREE.Color();
+
+    for (let i = 0; i < count; i++) {
+      // random direction on sphere
+      const u = Math.random();
+      const v = Math.random();
+      const theta = 2 * Math.PI * u;
+      const phi = Math.acos(2 * v - 1);
+      // radius between min and max (gives depth)
+      const r = radiusMin + Math.random() * (radiusMax - radiusMin);
+
+      const x = r * Math.sin(phi) * Math.cos(theta);
+      const y = r * Math.sin(phi) * Math.sin(theta);
+      const z = r * Math.cos(phi);
+
+      positions[i * 3] = x;
+      positions[i * 3 + 1] = y;
+      positions[i * 3 + 2] = z;
+
+      // subtle color variation: warm to cool
+      const t = Math.random();
+      color.setRGB(
+        0.9 + 0.1 * t,   // r
+        0.9 + 0.18 * (1 - t), // g
+        1.0 - 0.12 * t   // b
+      );
+      colors[i * 3] = color.r;
+      colors[i * 3 + 1] = color.g;
+      colors[i * 3 + 2] = color.b;
+
+      sizes[i] = 0.6 + Math.random() * 2.6;
+    }
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geo.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+
+    const mat = new THREE.PointsMaterial({
+      map: createStarSprite(64),
+      size: 2.6,
+      vertexColors: true,
+      sizeAttenuation: true,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      opacity: 0.95
+    });
+
+    const points = new THREE.Points(geo, mat);
+    points.renderOrder = 5;
+    return points;
+  }
+
+  // create and add star field
+  starPoints = buildStarField(5200, 800, 1950);
+  scene.add(starPoints);
+
+  // ========================================================================
+  // ================= SUN (with glow sprite) =================
+  const sunTexture = textureLoader.load(
+    'assets-management/sun.jpg',
+    () => {
+      if (sunTexture.colorSpace !== undefined) sunTexture.colorSpace = THREE.SRGBColorSpace;
+      else sunTexture.encoding = THREE.sRGBEncoding;
+      try { sunTexture.anisotropy = renderer.capabilities.getMaxAnisotropy(); } catch (e) {}
+    }
+  );
+
+  const sunRadius = 5;
+  const sunGeometry = new THREE.SphereGeometry(sunRadius, 64, 64);
+  const sunMaterial = new THREE.MeshStandardMaterial({
+    map: sunTexture,
+    emissiveMap: sunTexture,
+    emissive: new THREE.Color(0xff6a00),
+    emissiveIntensity: 6.0,
+    metalness: 0.0,
+    roughness: 1.0
+  });
+  sunMaterial.toneMapped = false;
+  const sun = new THREE.Mesh(sunGeometry, sunMaterial);
+  scene.add(sun);
+
+  function createGlowCanvas(size = 1024) {
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    const cx = size / 2, cy = size / 2, r = size / 2;
+    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+    grad.addColorStop(0.0, 'rgba(255,255,220,1)');
+    grad.addColorStop(0.25, 'rgba(255,200,120,0.85)');
+    grad.addColorStop(0.5, 'rgba(255,140,60,0.6)');
+    grad.addColorStop(1.0, 'rgba(255,80,0,0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, size, size);
+    const tex = new THREE.CanvasTexture(canvas);
+    if (tex.colorSpace !== undefined) tex.colorSpace = THREE.SRGBColorSpace;
+    else tex.encoding = THREE.sRGBEncoding;
+    tex.needsUpdate = true;
+    return tex;
+  }
+  const glowTexture = createGlowCanvas(1024);
+  const glowMaterial = new THREE.SpriteMaterial({
+    map: glowTexture,
+    color: 0xffffff,
+    transparent: true,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false
+  });
+  glowMaterial.toneMapped = false;
+  const sunGlow = new THREE.Sprite(glowMaterial);
+  sunGlow.renderOrder = 999;
+  scene.add(sunGlow);
+
+  // PLANET CREATOR
+  function createPlanetWithTexture(size, distance, texturePath, speed, fallbackColor) {
+    const geometry = new THREE.SphereGeometry(size, 32, 32);
+    let material;
+    if (texturePath) {
+      const texture = textureLoader.load(texturePath, () => {
+        if (texture.colorSpace !== undefined) texture.colorSpace = THREE.SRGBColorSpace;
+        else texture.encoding = THREE.sRGBEncoding;
+        try { texture.anisotropy = renderer.capabilities.getMaxAnisotropy(); } catch (e) {}
+      });
+      material = new THREE.MeshStandardMaterial({
+        map: texture,
+        roughness: 0.8,
+        metalness: 0.2,
+        emissive: new THREE.Color(0x222222),
+        emissiveIntensity: 0.15
+      });
+    } else {
+      material = new THREE.MeshStandardMaterial({
+        color: fallbackColor,
+        emissive: new THREE.Color(0x111111),
+        emissiveIntensity: 0.12
+      });
+    }
+
+    const planet = new THREE.Mesh(geometry, material);
+    const pivot = new THREE.Object3D();
+    planet.position.x = distance;
+    pivot.add(planet);
+    scene.add(pivot);
+
+    const orbit = new THREE.Mesh(
+      new THREE.RingGeometry(distance - 0.1, distance + 0.1, 128),
+      new THREE.MeshBasicMaterial({
+        color: 0x666666,
+        transparent: true,
+        opacity: 0.22,
+        side: THREE.DoubleSide
+      })
+    );
+    orbit.rotation.x = Math.PI / 2;
+    scene.add(orbit);
+
+    return { planet, pivot, speed };
+  }
+
+  // PLANETS (Mercury → Neptune)
+  const planets = [
+    createPlanetWithTexture(0.5, 7, 'assets-management/mercury.jpg', 0.04, 0x8c7853),
+    createPlanetWithTexture(0.8, 9, 'assets-management/venus.jpg', 0.03, 0xffc649),
+    createPlanetWithTexture(1, 12, 'assets-management/earth.jpg', 0.02, 0x2f6a69),
+    createPlanetWithTexture(0.7, 15, 'assets-management/mars.jpg', 0.018, 0xbc2731),
+    createPlanetWithTexture(2.5, 20, 'assets-management/jupiter.jpg', 0.01, 0xc88b3a),
+    createPlanetWithTexture(2, 26, 'assets-management/saturn.jpg', 0.008, 0xfad5a5),
+    createPlanetWithTexture(1.5, 32, 'assets-management/uranus.jpg', 0.006, 0x4fd0e7),
+    createPlanetWithTexture(1.4, 38, 'assets-management/neptune.jpg', 0.005, 0x4166f5)
+  ];
+
+  // ------- ADD MOON (orbits Earth) -------
+  const earthObj = planets[2];
+  const moonSize = 0.27;
+  const moonDistance = 2.2;
+  const moonSpeed = 0.06;
+
+  const moonTexture = textureLoader.load('assets-management/moon.jpg', () => {
+    if (moonTexture.colorSpace !== undefined) moonTexture.colorSpace = THREE.SRGBColorSpace;
+    else moonTexture.encoding = THREE.sRGBEncoding;
+    try { moonTexture.anisotropy = renderer.capabilities.getMaxAnisotropy(); } catch (e) {}
+  });
+
+  const moonMaterial = new THREE.MeshStandardMaterial({
+    map: moonTexture,
+    roughness: 0.95,
+    metalness: 0.0,
+    emissive: new THREE.Color(0x0a0a0a),
+    emissiveIntensity: 0.02
+  });
+
+  const moonGeometry = new THREE.SphereGeometry(moonSize, 32, 32);
+  const moon = new THREE.Mesh(moonGeometry, moonMaterial);
+
+  const moonPivot = new THREE.Object3D();
+  earthObj.planet.add(moonPivot);
+
+  moon.position.set(moonDistance, 0, 0);
+  moonPivot.add(moon);
+
+  const moonOrbit = new THREE.Mesh(
+    new THREE.RingGeometry(moonDistance - 0.04, moonDistance + 0.04, 64),
+    new THREE.MeshBasicMaterial({
+      color: 0x666666,
+      transparent: true,
+      opacity: 0.22,
+      side: THREE.DoubleSide
+    })
+  );
+  moonOrbit.rotation.x = Math.PI / 2;
+  moonOrbit.position.y = 0.0001;
+  earthObj.planet.add(moonOrbit);
+
+  planets.push({ planet: moon, pivot: moonPivot, speed: moonSpeed });
+
+  // --- SATURN RING (added) ---
+  (function addSaturnRing() {
+    const saturnIndex = 5; // Saturn is the 6th entry (0-based)
+    const saturnObj = planets[saturnIndex];
+    if (!saturnObj || !saturnObj.planet) return;
+
+    // Saturn planet radius (as used above) is 2. We'll choose inner/outer ring radii relative to that.
+    const planetRadius = 2;
+    const ringInner = planetRadius * 1.25; // inner radius slightly outside the planet
+    const ringOuter = planetRadius * 3.2;  // outer radius of ring system
+
+    const ringSegments = 256;
+    const ringGeometry = new THREE.RingGeometry(ringInner, ringOuter, ringSegments, 1);
+
+    // Default fallback material (visible even without a texture)
+    const fallbackMat = new THREE.MeshStandardMaterial({
+      color: 0xD9C59C,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.75,
+      metalness: 0.05,
+      roughness: 0.9,
+    });
+
+    const ringMesh = new THREE.Mesh(ringGeometry, fallbackMat);
+    ringMesh.renderOrder = 45;
+    // Position ring at planet origin so it orbits/rotates with the planet
+    ringMesh.position.set(0, 0, 0);
+
+    // Orient the ring into the planet's equatorial plane and tilt it slightly for realism
+    ringMesh.rotation.x = Math.PI / 2 + 0.42; // +0.42 rad tilt (you can tweak)
+
+    // Add ring as a child of the planet mesh so it moves/rotates with the planet.
+    saturnObj.planet.add(ringMesh);
+    saturnObj.ring = ringMesh;
+
+    // Attempt to load a ring texture (user will add this file). If present, replace material.
+    const ringTexturePath = 'assets-management/saturn_ring.png'; // <-- place your ring texture here
+    textureLoader.load(ringTexturePath,
+      (tex) => {
+        if (tex.colorSpace !== undefined) tex.colorSpace = THREE.SRGBColorSpace;
+        else tex.encoding = THREE.sRGBEncoding;
+        try { tex.anisotropy = renderer.capabilities.getMaxAnisotropy(); } catch (e) {}
+
+        const ringMaterial = new THREE.MeshStandardMaterial({
+          map: tex,
+          side: THREE.DoubleSide,
+          transparent: true,
+          alphaTest: 0.02,
+          metalness: 0.05,
+          roughness: 0.9
+        });
+        ringMaterial.needsUpdate = true;
+        ringMesh.material = ringMaterial;
+      },
+      undefined,
+      // On error (texture missing), we'll just keep the fallbackMaterial visible.
+      (err) => {
+        // texture not found or failed to load: keep fallback material
+      }
+    );
+  })();
+
+  // --- LABELS SETUP ---
+  const planetNames = ['Mercury', 'Venus', 'Earth', 'Mars', 'Jupiter', 'Saturn', 'Uranus', 'Neptune', 'Moon'];
+  const labelsContainer = document.getElementById('labels');
+
+  planets.forEach((p, i) => {
+    const el = document.createElement('div');
+    el.className = 'label';
+    el.textContent = planetNames[i] || `Object ${i+1}`;
+    labelsContainer.appendChild(el);
+    p.labelEl = el;
+  });
+
+  const sunLabel = document.createElement('div');
+  sunLabel.className = 'label';
+  sunLabel.textContent = 'Sun';
+  labelsContainer.appendChild(sunLabel);
+
+  // CAMERA CONTROLS
+  let isDragging = false;
+  let prev = { x: 0, y: 0 };
+  let theta = 0, phi = Math.PI / 6;
+  let distance = 50;
+
+  renderer.domElement.addEventListener('mousedown', e => {
+    isDragging = true;
+    prev = { x: e.clientX, y: e.clientY };
+  });
+
+  renderer.domElement.addEventListener('mousemove', e => {
+    if (!isDragging) return;
+    theta -= (e.clientX - prev.x) * 0.005;
+    phi += (e.clientY - prev.y) * 0.005;
+    phi = Math.max(0.1, Math.min(Math.PI - 0.1, phi));
+    prev = { x: e.clientX, y: e.clientY };
+  });
+
+  renderer.domElement.addEventListener('mouseup', () => isDragging = false);
+  renderer.domElement.addEventListener('mouseleave', () => isDragging = false);
+
+  renderer.domElement.addEventListener('wheel', e => {
+    distance += e.deltaY * 0.05;
+    distance = Math.max(20, Math.min(600, distance));
+  }, { passive: true });
+
+  function updateCamera() {
+    camera.position.set(
+      distance * Math.sin(phi) * Math.cos(theta),
+      distance * Math.cos(phi),
+      distance * Math.sin(phi) * Math.sin(theta)
+    );
+    camera.lookAt(0, 0, 0);
+  }
+
+  const projVector = new THREE.Vector3();
+  const worldPos = new THREE.Vector3();
+
+  // ANIMATION LOOP
+  function animate() {
+    requestAnimationFrame(animate);
+
+    const t = clock.getElapsedTime();
+
+    sun.rotation.y += 0.002;
+    sunLight.position.copy(sun.position);
+
+    planets.forEach(p => {
+      p.pivot.rotation.y += p.speed;
+      p.planet.rotation.y += 0.01;
+    });
+
+    updateCamera();
+
+    // subtle twinkle / breathing on the procedural star points
+    if (starPoints && starPoints.material) {
+      // slight global opacity breathing and a tiny size modulation
+      starPoints.material.opacity = 0.7 + 0.18 * Math.sin(t * 0.6);
+      starPoints.material.size = 2.0 + 0.6 * Math.sin(t * 0.9);
+    }
+
+    // rotate milky way slowly for parallax
+    if (milkyWaySphere) milkyWaySphere.rotation.y += 0.00008;
+
+    sun.getWorldPosition(worldPos);
+    sunGlow.position.copy(worldPos);
+    const sdist = camera.position.distanceTo(worldPos);
+    const baseFactor = 1.8;
+    const glowScale = Math.max(1.0, baseFactor * (sdist * 0.03)) * sunRadius;
+    sunGlow.scale.set(glowScale, glowScale, 1);
+
+    planets.forEach((p) => {
+      p.planet.getWorldPosition(worldPos);
+      projVector.copy(worldPos).project(camera);
+
+      const visible = (
+        projVector.x >= -1 && projVector.x <= 1 &&
+        projVector.y >= -1 && projVector.y <= 1 &&
+        projVector.z >= -1 && projVector.z <= 1
+      );
+
+      const x = (projVector.x * 0.5 + 0.5) * window.innerWidth;
+      const y = (-projVector.y * 0.5 + 0.5) * window.innerHeight;
+
+      if (visible) {
+        p.labelEl.style.display = 'block';
+        p.labelEl.style.left = `${Math.round(x)}px`;
+        const dist = camera.position.distanceTo(worldPos);
+        const offset = Math.max(8, Math.min(48, 120 / dist));
+        p.labelEl.style.top = `${Math.round(y + offset)}px`;
+        const size = Math.max(10, Math.min(16, 28 - dist * 0.15));
+        p.labelEl.style.fontSize = `${size}px`;
+        p.labelEl.style.opacity = `${Math.max(0.5, Math.min(1, 1 - (dist - 20) / 80))}`;
+      } else {
+        p.labelEl.style.display = 'none';
+      }
+    });
+
+    sun.getWorldPosition(worldPos);
+    projVector.copy(worldPos).project(camera);
+    const sunVisible =
+      projVector.x >= -1 && projVector.x <= 1 &&
+      projVector.y >= -1 && projVector.y <= 1 &&
+      projVector.z >= -1 && projVector.z <= 1;
+    const sx = (projVector.x * 0.5 + 0.5) * window.innerWidth;
+    const sy = (-projVector.y * 0.5 + 0.5) * window.innerHeight;
+    if (sunVisible) {
+      sunLabel.style.display = 'block';
+      sunLabel.style.left = `${Math.round(sx)}px`;
+      const sdist2 = camera.position.distanceTo(worldPos);
+      const soffset = Math.max(18, Math.min(64, 200 / sdist2));
+      sunLabel.style.top = `${Math.round(sy + soffset)}px`;
+      const ssize = Math.max(12, Math.min(20, 36 - sdist2 * 0.15));
+      sunLabel.style.fontSize = `${ssize}px`;
+      sunLabel.style.opacity = `${Math.max(0.6, Math.min(1, 1 - (sdist2 - 20) / 80))}`;
+    } else {
+      sunLabel.style.display = 'none';
+    }
+
+    renderer.render(scene, camera);
+  }
+  animate();
+
+  window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  });
+</script>
+</body>
+</html>
